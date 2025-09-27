@@ -1,15 +1,3 @@
-"""
-線形混合効果モデル（LMM）分析
-eスポーツコース効果の縦断研究
-TMT単位修正版（ミリ秒→秒）
-
-実行方法:
-python lmm_analysis.py
-
-必要なライブラリ:
-pip install statsmodels pandas numpy matplotlib seaborn plotly openpyxl
-"""
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
