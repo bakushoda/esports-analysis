@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 
 # エクセルファイルを読み込む
-input_file = 'data/noncognitive_2025_05_shinagaku.xlsx'
+input_file = 'data/noncognitive_2025_highschool.xlsx'
 master_file = 'data/data_master.xlsx'
 df = pd.read_excel(input_file)
 
@@ -23,8 +23,15 @@ for column in df.columns:
 # 出力する列のリスト
 output_columns = [
     '氏名', '性別', '学年', '所属',
-    'これまでどのようなゲームをプレイしていますか（複数選択可）',
-    'ゲームをプレイする主なプラットフォームは何ですか（複数選択可）',
+    'ゲームをする主な目的を教えてください。',
+    '主にどのようなジャンルのゲームをプレイしますか（複数回答可）',
+    '以下のゲームタイトルでプレイしたことがあるものをチェックしてください。（複数選択可、なければ何もチェックしなくて大丈夫です。）',
+    '以下のゲームタイトルで普段プレイしているものを選択してください。（週1.2回以上、複数選択可、なければ何もチェックしなくて大丈夫です。）',
+    'Valorantのプレイ経験はありますか。',
+    'Valorantの最高到達ランク',
+    'League of Legendsのプレイ経験はありますか。',
+    'League of Legendsの最高到達ランク',
+    'Fortniteの最高到達ランク',
     '1日にどれくらいの時間ゲームをプレイしていますか',
     '週何日程度ゲームをプレイしていますか'
 ]
@@ -160,13 +167,17 @@ if all_columns:
     # データ移行処理
     print('\nデータ移行処理を開始します...')
 
-    # student_listから氏名とparticipant_idの対応を作成
-    student_list = pd.read_excel(master_file, sheet_name='student_list')
-    name_to_id = dict(zip(student_list['氏名'], student_list['participant_id']))
-
-    # participant_idを追加
+    # participant_idを入力ファイルの実験参加者IDから優先的に取得（列が無い場合はstudent_listで氏名からマッピング）
     df_output = df_output.copy()
-    df_output['participant_id'] = df_output['氏名'].map(lambda x: name_to_id.get(x, 'undefined'))
+    try:
+        participant_col = get_col('実験参加者ID')
+        df_output['participant_id'] = df[participant_col]
+        print('participant_id: 入力ファイルの「実験参加者ID」を使用しました。')
+    except KeyError:
+        student_list = pd.read_excel(master_file, sheet_name='student_list')
+        name_to_id = dict(zip(student_list['氏名'], student_list['participant_id']))
+        df_output['participant_id'] = df_output['氏名'].map(lambda x: name_to_id.get(x, 'undefined'))
+        print('participant_id: 「実験参加者ID」列が見つからないため、student_listで氏名からマッピングしました。')
 
     # undefinedのparticipant_idを持つ氏名をログ出力
     undefined_names = df_output[df_output['participant_id'] == 'undefined']['氏名'].tolist()
@@ -180,8 +191,17 @@ if all_columns:
         '性別': 'gender',
         '学年': 'grade_at_measurement',
         '所属': 'course',
-        'これまでどのようなゲームをプレイしていますか（複数選択可）': 'game_genre',
-        'ゲームをプレイする主なプラットフォームは何ですか（複数選択可）': 'game_platform',
+        '部活動': 'club_activity',
+        'いつからeスポーツ（ゲーム）を始めましたか': 'gaming_start_age',
+        'ゲームをする主な目的を教えてください。': 'gaming_purpose_text',
+        '主にどのようなジャンルのゲームをプレイしますか（複数回答可）': 'game_genre',
+        '以下のゲームタイトルでプレイしたことがあるものをチェックしてください。（複数選択可、なければ何もチェックしなくて大丈夫です。）': 'games_experienced',
+        '以下のゲームタイトルで普段プレイしているものを選択してください。（週1.2回以上、複数選択可、なければ何もチェックしなくて大丈夫です。）': 'currently_playing_games',
+        'Valorantのプレイ経験はありますか。': 'played_valorant',
+        'Valorantの最高到達ランク': 'rank_highest_valorant',
+        'League of Legendsのプレイ経験はありますか。': 'played_lol',
+        'League of Legendsの最高到達ランク': 'rank_highest_lol',
+        'Fortniteの最高到達ランク': 'rank_highest_fortnite',
         '1日にどれくらいの時間ゲームをプレイしていますか': 'playtime_per_day',
         '週何日程度ゲームをプレイしていますか': 'playdays_per_week',
         'タイムスタンプ': 'measurement_date',
@@ -224,9 +244,37 @@ if all_columns:
             renamed_df['measurement_wave'] = 1
             combined_df = renamed_df
 
-        # cohortとschool_idを設定
-        # 学年に基づいてcohortを設定
-        def determine_cohort(grade):
+        # school_idを設定（participant_idの接頭辞に基づく）
+        def determine_school_id(participant_id):
+            if pd.isna(participant_id) or participant_id == 'undefined':
+                return None
+            participant_str = str(participant_id).lower()
+            if participant_str.startswith('sg'):
+                return 1
+            elif participant_str.startswith('ek'):
+                return 2
+            elif participant_str.startswith('ke'):
+                return 3
+            elif participant_str.startswith('mk'):
+                return 4
+            elif participant_str.startswith('tk'):
+                return 5
+            elif participant_str.startswith('hg'):
+                return 6
+            else:
+                return None
+        
+        combined_df['school_id'] = combined_df['participant_id'].apply(determine_school_id)
+        
+        # cohortを設定（sgの生徒のみ）
+        def determine_cohort(row):
+            participant_id = row['participant_id']
+            grade = row['grade_at_measurement']
+            
+            # sgの生徒のみcohortを設定
+            if pd.isna(participant_id) or participant_id == 'undefined' or not str(participant_id).lower().startswith('sg'):
+                return None
+            
             if pd.isna(grade):
                 return '2024_G1'  # デフォルト値
             grade_str = str(grade).strip()
@@ -237,8 +285,7 @@ if all_columns:
             else:
                 return '2024_G1'  # デフォルト値
         
-        combined_df['cohort'] = combined_df['grade_at_measurement'].apply(determine_cohort)
-        combined_df['school_id'] = 1
+        combined_df['cohort'] = combined_df.apply(determine_cohort, axis=1)
 
         # participant_idで昇順ソート（undefinedは最後に）
         combined_df['participant_id_sort'] = combined_df['participant_id'].apply(lambda x: str(x) if x != 'undefined' else 'zzzzzzzz')
