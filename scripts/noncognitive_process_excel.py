@@ -250,6 +250,10 @@ for sheet_name in target_sheets:
             
             # 列名の変換
             renamed_df = df_output.rename(columns=available_mapping)
+            
+            # grade_at_measurementから「年生」を削除
+            if 'grade_at_measurement' in renamed_df.columns:
+                renamed_df['grade_at_measurement'] = renamed_df['grade_at_measurement'].astype(str).str.replace('年生', '', regex=False)
 
             # 必要な列のみを選択（存在する列のみ）
             target_columns = ['participant_id'] + list(available_mapping.values())
