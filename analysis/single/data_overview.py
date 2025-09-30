@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Iterable
 
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -97,6 +98,27 @@ def compute_school_summaries(df: pd.DataFrame, school_column: str = "school_id")
     return results
 
 
+def _build_sheet_name(base: str, used_names: set[str]) -> str:
+    """Return a workbook-compatible, unique sheet name.
+
+    Excel restricts sheet names to 31 characters. This helper truncates and, if
+    necessary, appends a numeric suffix to keep names unique within the export.
+    """
+
+    safe = "".join(ch if ch not in "[]:*?/\\" else "_" for ch in base)
+    max_length = 31
+
+    candidate = safe[:max_length]
+    counter = 1
+    while candidate in used_names:
+        suffix = f"_{counter}"
+        candidate = f"{safe[: max_length - len(suffix)]}{suffix}" if len(suffix) < max_length else suffix[-max_length:]
+        counter += 1
+
+    used_names.add(candidate)
+    return candidate
+
+
 def save_excel_reports(
     overall_numeric: pd.DataFrame,
     overall_categorical: dict[str, pd.Series],
@@ -107,36 +129,62 @@ def save_excel_reports(
     LOGGER.info("Writing Excel report to %s", output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    used_sheet_names: set[str] = set()
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         if not overall_numeric.empty:
-            overall_numeric.to_excel(writer, sheet_name="overall_numeric")
+            name = _build_sheet_name("overall_numeric", used_sheet_names)
+            overall_numeric.to_excel(writer, sheet_name=name)
         if overall_categorical:
             for column, counts in overall_categorical.items():
-                counts.to_frame(name="count").to_excel(writer, sheet_name=f"overall_cat_{column[:25]}")
+                name = _build_sheet_name(f"overall_cat_{column}", used_sheet_names)
+                counts.to_frame(name="count").to_excel(writer, sheet_name=name)
 
         for school_id, summaries in school_summaries.items():
             numeric = summaries.get("numeric")
             categorical = summaries.get("categorical")
 
             if numeric is not None and not numeric.empty:
-                numeric.to_excel(writer, sheet_name=f"school_{school_id}_numeric")
+                name = _build_sheet_name(f"school_{school_id}_numeric", used_sheet_names)
+                numeric.to_excel(writer, sheet_name=name)
             if categorical:
                 for column, counts in categorical.items():
-                    counts.to_frame(name="count").to_excel(
-                        writer, sheet_name=f"school_{school_id}_cat_{str(column)[:20]}"
-                    )
+                    name = _build_sheet_name(f"school_{school_id}_cat_{column}", used_sheet_names)
+                    counts.to_frame(name="count").to_excel(writer, sheet_name=name)
 
 
 def generate_distribution_plots(df: pd.DataFrame, figure_dir: Path, hue: str = "school_id") -> None:
     """Generate distribution plots for numeric features."""
     figure_dir.mkdir(parents=True, exist_ok=True)
-    numeric_columns: Iterable[str] = df.select_dtypes(include=["number"]).columns
+    numeric_df = df.select_dtypes(include=["number"]).copy()
+    # Include object columns that can be safely coerced to numeric values.
+    for column in df.select_dtypes(include=["object"]).columns:
+        coerced = pd.to_numeric(df[column], errors="coerce")
+        if coerced.notna().any():
+            numeric_df.loc[:, column] = coerced
+
+    numeric_columns: Iterable[str] = numeric_df.columns
 
     sns.set_theme(style="whitegrid")
 
     for column in numeric_columns:
+        series = numeric_df[column].dropna()
+        if series.nunique() <= 1:
+            LOGGER.info("Skipping distribution plot for %s due to insufficient variance", column)
+            continue
+
+        plot_df = pd.DataFrame({column: series})
+        if hue in df.columns:
+            plot_df[hue] = df.loc[series.index, hue]
+
         plt.figure(figsize=(8, 5))
-        sns.histplot(data=df, x=column, hue=hue if hue in df.columns else None, kde=True, element="step")
+        sns.histplot(
+            data=plot_df,
+            x=column,
+            hue=hue if hue in plot_df.columns else None,
+            kde=False,
+            element="step",
+        )
         plt.title(f"Distribution of {column}")
         plt.tight_layout()
         hist_path = figure_dir / f"{column}_hist.png"
@@ -145,10 +193,10 @@ def generate_distribution_plots(df: pd.DataFrame, figure_dir: Path, hue: str = "
 
         plt.figure(figsize=(6, 5))
         if hue in df.columns:
-            sns.boxplot(data=df, x=hue, y=column)
+            sns.boxplot(data=pd.DataFrame({column: series, hue: df.loc[series.index, hue]}), x=hue, y=column)
             plt.title(f"{column} by {hue}")
         else:
-            sns.boxplot(y=df[column])
+            sns.boxplot(y=series)
             plt.title(f"{column} distribution")
         plt.tight_layout()
         box_path = figure_dir / f"{column}_box.png"
