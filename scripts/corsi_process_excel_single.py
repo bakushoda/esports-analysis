@@ -13,7 +13,7 @@ class CorsiDataIntegratorHighschool:
         """
         self.data_dir = data_dir
         self.master_file = os.path.join(data_dir, "data_master.xlsx")
-        self.corsi_file = os.path.join(data_dir, "cognitive", "tiger_2024yobijikken_corsiblocktappingtask(ja)_summary_2507120436.xlsx")
+        self.corsi_file = os.path.join(data_dir, "cognitive", "tiger_2024yobijikken_corsiblocktappingtask(ja)_summary_2509300825.xlsx")
         
     def load_data(self):
         """

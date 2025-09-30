@@ -13,7 +13,7 @@ class UFOVDataIntegratorHighschool:
         """
         self.data_dir = data_dir
         self.master_file = os.path.join(data_dir, "data_master.xlsx")
-        self.ufov_file = os.path.join(data_dir, "cognitive", "tiger_2024yobijikken_usefulfieldofviewtest(ja)_summary_2507120824.xlsx")
+        self.ufov_file = os.path.join(data_dir, "cognitive", "tiger_2024yobijikken_usefulfieldofviewtest(ja)_summary_2509300805.xlsx")
         
     def load_data(self):
         """
