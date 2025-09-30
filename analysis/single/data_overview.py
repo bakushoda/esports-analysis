@@ -153,8 +153,25 @@ def save_excel_reports(
                     counts.to_frame(name="count").to_excel(writer, sheet_name=name)
 
 
+def _prepare_bar_data(series: pd.Series, max_categories: int = 20) -> pd.DataFrame:
+    """Return counts for either discrete values or binned ranges."""
+
+    if series.nunique() <= max_categories:
+        order = sorted(series.unique())
+        counts = series.value_counts(sort=False)
+        counts = counts.reindex(order)
+        return counts.rename_axis("category").reset_index(name="count")
+
+    # For many unique values, aggregate into bins for readability.
+    bins = min(10, series.nunique())
+    binned = pd.cut(series, bins=bins, include_lowest=True)
+    counts = binned.value_counts(sort=False)
+    counts.index = counts.index.astype(str)
+    return counts.rename_axis("category").reset_index(name="count")
+
+
 def generate_distribution_plots(df: pd.DataFrame, figure_dir: Path, hue: str = "school_id") -> None:
-    """Generate distribution plots for numeric features."""
+    """Generate bar charts describing numeric feature distributions."""
     figure_dir.mkdir(parents=True, exist_ok=True)
     numeric_df = df.select_dtypes(include=["number"]).copy()
     # Include object columns that can be safely coerced to numeric values.
@@ -177,31 +194,44 @@ def generate_distribution_plots(df: pd.DataFrame, figure_dir: Path, hue: str = "
         if hue in df.columns:
             plot_df[hue] = df.loc[series.index, hue]
 
+        base_counts = _prepare_bar_data(series)
+
         plt.figure(figsize=(8, 5))
-        sns.histplot(
-            data=plot_df,
-            x=column,
-            hue=hue if hue in plot_df.columns else None,
-            kde=False,
-            element="step",
-        )
+        sns.barplot(data=base_counts, x="category", y="count", color="#4c72b0")
         plt.title(f"Distribution of {column}")
+        plt.xlabel(column)
+        plt.ylabel("Count")
+        plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
-        hist_path = figure_dir / f"{column}_hist.png"
-        plt.savefig(hist_path, dpi=300)
+        bar_path = figure_dir / f"{column}_bar.png"
+        plt.savefig(bar_path, dpi=300)
         plt.close()
 
-        plt.figure(figsize=(6, 5))
         if hue in df.columns:
-            sns.boxplot(data=pd.DataFrame({column: series, hue: df.loc[series.index, hue]}), x=hue, y=column)
-            plt.title(f"{column} by {hue}")
-        else:
-            sns.boxplot(y=series)
-            plt.title(f"{column} distribution")
-        plt.tight_layout()
-        box_path = figure_dir / f"{column}_box.png"
-        plt.savefig(box_path, dpi=300)
-        plt.close()
+            hue_series = df.loc[series.index, hue]
+            hue_df = pd.DataFrame({column: series, hue: hue_series})
+
+            if series.nunique() <= 20:
+                hue_df["category"] = hue_df[column]
+            else:
+                bins = min(10, series.nunique())
+                hue_df["category"] = pd.cut(hue_df[column], bins=bins, include_lowest=True)
+
+            grouped = (
+                hue_df.groupby(["category", hue]).size().reset_index(name="count")
+            )
+            grouped["category"] = grouped["category"].astype(str)
+
+            plt.figure(figsize=(8, 5))
+            sns.barplot(data=grouped, x="category", y="count", hue=hue)
+            plt.title(f"Distribution of {column} by {hue}")
+            plt.xlabel(column)
+            plt.ylabel("Count")
+            plt.xticks(rotation=45, ha="right")
+            plt.tight_layout()
+            hue_bar_path = figure_dir / f"{column}_by_{hue}_bar.png"
+            plt.savefig(hue_bar_path, dpi=300)
+            plt.close()
 
 
 def main() -> None:
